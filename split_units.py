@@ -25,8 +25,15 @@ UNITS = {
     # uses; in master order 91 precedes 107, so the vehicle executes 107
     # immediately before 91. Assembly splices by cell id, so the final
     # notebook keeps the master layout; only execution order differs.
+    # Master cell 120 rebinds `summ` to the maturity-ladder frame,
+    # but master cell 129 still reads the original E1 `summ`
+    # (t0/vars/mean). The vehicle therefore runs 129 before 120, and a
+    # scaffold cell (id 'scaffold-rebuild-summ', inserted in main())
+    # rebuilds the original `summ` from its CSV right before 129, so
+    # resumes (whose replay ends with the ladder frame) also work.
     "U0_taske": list(range(0, 91)) + [107, 91] + list(range(100, 107))
-                + list(range(108, 132)),
+                + list(range(108, 120)) + [129, 120] + list(range(121, 129))
+                + [130, 131],
     "U1_chronos": list(range(92, 100)),
     "U2_physics": list(range(132, 154)),
     "U3_sensorllm": list(range(154, 174)),
@@ -89,6 +96,26 @@ LF_VARIANT = {
 }
 
 
+SCAFFOLD_SUMM = {
+    "cell_type": "code", "id": "scaffold-rebuild-summ",
+    "metadata": {}, "execution_count": None, "outputs": [],
+    "source": (
+        "# --- execution scaffold (vehicle only; not part of the study) ---\n"
+        "# Master cell 120 rebinds `summ` to the maturity-ladder frame, but\n"
+        "# the next cell (master 129) reads the original E1 summary table.\n"
+        "# Rebuild it here with the exact expressions of master cell 68\n"
+        "# (which reads the same CSV), so cell 129 sees the table it expects\n"
+        "# in both fresh runs and resumed runs.\n"
+        "M = pd.read_csv(RES / \"main_metrics_lr_rf.csv\")\n"
+        "summ = (M.groupby([\"t0\", \"vars\", \"model\", \"W\"])[\"macro_F1\"]"
+        ".agg([\"mean\", \"std\", \"count\"]).reset_index())\n"
+        "acc = M.groupby([\"t0\", \"vars\", \"model\", \"W\"])[\"accuracy\"]"
+        ".mean().rename(\"acc_mean\").reset_index()\n"
+        "summ = summ.merge(acc)\n"
+        "print('summ rebuilt:', summ.shape)\n"),
+}
+
+
 def main():
     master = json.loads(Path(sys.argv[1]).read_text())
     outdir = Path(sys.argv[2])
@@ -97,6 +124,8 @@ def main():
     for unit, idxs in UNITS.items():
         ucells = []
         for i in idxs:
+            if unit == "U0_taske" and i == 129:
+                ucells.append(copy.deepcopy(SCAFFOLD_SUMM))
             c = copy.deepcopy(cells[i])
             if c["cell_type"] == "code":
                 c["outputs"] = []

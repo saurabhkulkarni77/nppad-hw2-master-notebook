@@ -24,11 +24,13 @@ for fresh_path in sorted(new_dir.glob("*.ipynb")):
     for c in fresh["cells"]:
         o = state.get(c["id"])
         if o is not None and c["cell_type"] == "code" \
-                and o.get("execution_count") is not None:
+                and o.get("execution_count") is not None \
+                and "exec_error" not in o.get("metadata", {}):
+            # Only successfully executed cells are transplanted; a cell
+            # that errored stays pending in the fresh vehicle so the
+            # resume re-runs it.
             c["outputs"] = o.get("outputs", [])
             c["execution_count"] = o["execution_count"]
-            if "exec_error" in o.get("metadata", {}):
-                c["metadata"]["exec_error"] = o["metadata"]["exec_error"]
             moved += 1
     fresh_path.write_text(json.dumps(fresh, indent=1))
     print(fresh_path.name, "transplanted", moved, "executed cells")

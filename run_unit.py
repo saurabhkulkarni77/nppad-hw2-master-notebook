@@ -71,9 +71,11 @@ def main():
     done_cells = [(i, c) for i, c in enumerate(nb["cells"])
                   if c.get("cell_type") == "code"
                   and c.get("execution_count") is not None
+                  and "exec_error" not in c.get("metadata", {})
                   and cell_source(c).strip()]
     has_pending = any(c.get("cell_type") == "code"
-                      and c.get("execution_count") is None
+                      and (c.get("execution_count") is None
+                           or "exec_error" in c.get("metadata", {}))
                       and cell_source(c).strip() for c in nb["cells"])
     if done_cells and has_pending:
         record({"event": "replay_start", "count": len(done_cells)})
@@ -116,8 +118,14 @@ def main():
         for idx, cell in enumerate(nb["cells"]):
             if cell.get("cell_type") != "code":
                 continue
-            if cell.get("execution_count") is not None:
+            if cell.get("execution_count") is not None \
+                    and "exec_error" not in cell.get("metadata", {}):
                 continue
+            if "exec_error" in cell.get("metadata", {}):
+                # previously failed cell: clear and re-run
+                cell["outputs"] = []
+                cell["execution_count"] = None
+                del cell["metadata"]["exec_error"]
             src = cell_source(cell)
             if not src.strip():
                 cell["execution_count"] = None
