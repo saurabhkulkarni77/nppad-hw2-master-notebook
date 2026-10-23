@@ -73,9 +73,12 @@ jobs:
       - name: Build vehicles
         run: |
           cd state
-          if [ ! -f units/U0_taske.ipynb ]; then
-            python ../split_units.py ../master.ipynb units
+          python ../split_units.py ../master.ipynb units_fresh
+          if [ -d units ]; then
+            python ../merge_vehicles.py units units_fresh
+            rm -rf units
           fi
+          mv units_fresh units
           ls -la units
 
       - name: Run unit

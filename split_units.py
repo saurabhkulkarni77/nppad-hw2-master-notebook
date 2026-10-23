@@ -21,7 +21,12 @@ import copy, json, sys
 from pathlib import Path
 
 UNITS = {
-    "U0_taske": list(range(0, 92)) + list(range(100, 132)),
+    # Master cell 107 (E4a) defines f1_table(), which the export cell 91
+    # uses; in master order 91 precedes 107, so the vehicle executes 107
+    # immediately before 91. Assembly splices by cell id, so the final
+    # notebook keeps the master layout; only execution order differs.
+    "U0_taske": list(range(0, 91)) + [107, 91] + list(range(100, 107))
+                + list(range(108, 132)),
     "U1_chronos": list(range(92, 100)),
     "U2_physics": list(range(132, 154)),
     "U3_sensorllm": list(range(154, 174)),
