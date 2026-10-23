@@ -1,0 +1,134 @@
+name: Execute NPPAD master notebook
+
+on:
+  workflow_dispatch:
+    inputs:
+      unit:
+        description: "Execution unit to run"
+        required: true
+        type: choice
+        options: [U0, U1, U2, U3, U4, assemble]
+      state_run_id:
+        description: "Previous run id to resume workspace state from (blank = fresh)"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: nppad-exec
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install harness + common deps
+        run: |
+          pip install -q -r requirements-harness.txt
+          pip install -q --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -q transformers chronos-forecasting
+
+      - name: Restore workspace state
+        if: ${{ inputs.state_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace
+          run-id: ${{ inputs.state_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: state_dl
+
+      - name: Unpack / init state
+        run: |
+          mkdir -p state
+          if [ -f state_dl/workspace.tar.gz ]; then
+            tar -xzf state_dl/workspace.tar.gz -C state
+            echo "restored state:"; du -sh state
+          else
+            echo "fresh state"
+          fi
+
+      - name: Stage dataset (public source repo)
+        run: |
+          cd state
+          if [ ! -d NuclearPowerPlantAccidentData/Operation_csv_data ]; then
+            git clone -q --depth 1 --filter=blob:none --sparse https://github.com/thu-inet/NuclearPowerPlantAccidentData ds_tmp
+            (cd ds_tmp && git sparse-checkout set Operation_csv_data Variable_Power_Data)
+            mv ds_tmp NuclearPowerPlantAccidentData
+          fi
+          echo "mdb files: $(find NuclearPowerPlantAccidentData/Variable_Power_Data -name '*.mdb' | wc -l)"
+          echo "csvs: $(find NuclearPowerPlantAccidentData -name '*.csv' | wc -l)"
+          du -sh NuclearPowerPlantAccidentData
+
+      - name: Build vehicles
+        run: |
+          cd state
+          if [ ! -f units/U0_taske.ipynb ]; then
+            python ../split_units.py ../master.ipynb units
+          fi
+          ls -la units
+
+      - name: Run unit
+        if: ${{ inputs.unit != 'assemble' }}
+        env:
+          NPPAD_DATA_DIR: ${{ github.workspace }}/state/NuclearPowerPlantAccidentData
+        run: |
+          set -o pipefail
+          cd state
+          UNITFILE=$(ls units/${{ inputs.unit }}_*.ipynb)
+          echo "executing $UNITFILE"
+          python ../run_unit.py "$UNITFILE" --workdir . --kernel python3 \
+            --log "logs_${{ inputs.unit }}.json" 2>&1 | tee "console_${{ inputs.unit }}.log"
+
+      - name: Assemble + PDF
+        if: ${{ inputs.unit == 'assemble' }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q texlive-xetex texlive-fonts-recommended texlive-plain-generic lmodern pandoc
+          cd state
+          python ../assemble.py ../master.ipynb units assembled.ipynb
+          jupyter nbconvert --to pdf --output NPPAD_Master_Executed assembled.ipynb
+          ls -la assembled.ipynb NPPAD_Master_Executed.pdf
+
+      - name: Pack workspace
+        if: always()
+        run: |
+          tar --exclude=./NuclearPowerPlantAccidentData -czf workspace.tar.gz -C state .
+          ls -la workspace.tar.gz
+
+      - name: Upload workspace state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace
+          path: workspace.tar.gz
+
+      - name: Upload unit outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-${{ inputs.unit }}
+          path: |
+            state/units/${{ inputs.unit }}_*.ipynb
+            state/logs_${{ inputs.unit }}.json
+            state/console_${{ inputs.unit }}.log
+          if-no-files-found: warn
+
+      - name: Upload assembled deliverables
+        if: ${{ inputs.unit == 'assemble' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: assembled
+          path: |
+            state/assembled.ipynb
+            state/NPPAD_Master_Executed.pdf

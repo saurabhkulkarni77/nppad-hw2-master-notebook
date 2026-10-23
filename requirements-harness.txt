@@ -1,0 +1,11 @@
+# Execution harness (the notebook's own setup cells install the rest)
+jupyter_client
+ipykernel
+nbformat
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+access-parser
+iapws
