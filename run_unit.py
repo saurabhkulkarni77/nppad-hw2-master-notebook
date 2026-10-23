@@ -63,6 +63,54 @@ def main():
     exec_counter = max(
         [c.get("execution_count") or 0 for c in nb["cells"]] + [0])
 
+    # Resume support: a fresh kernel lacks the namespace (imports, result
+    # dicts) built by cells executed in earlier sessions. If this run is a
+    # resume, replay those cells kernel-side only (their saved notebook
+    # outputs stay untouched) so pending cells see the same state as in
+    # one continuous run.
+    done_cells = [(i, c) for i, c in enumerate(nb["cells"])
+                  if c.get("cell_type") == "code"
+                  and c.get("execution_count") is not None
+                  and cell_source(c).strip()]
+    has_pending = any(c.get("cell_type") == "code"
+                      and c.get("execution_count") is None
+                      and cell_source(c).strip() for c in nb["cells"])
+    if done_cells and has_pending:
+        record({"event": "replay_start", "count": len(done_cells)})
+        for idx, cell in done_cells:
+            msg_id = kc.execute(cell_source(cell), store_history=False,
+                                allow_stdin=False)
+            deadline = time.time() + args.cell_timeout
+            idle = False
+            rerr = None
+            while not idle:
+                if time.time() > deadline:
+                    rerr = f"replay timeout at cell {idx}"
+                    break
+                try:
+                    msg = kc.get_iopub_msg(timeout=30)
+                except Exception:
+                    if not km.is_alive():
+                        rerr = "kernel died during replay"
+                        break
+                    continue
+                if msg["parent_header"].get("msg_id") != msg_id:
+                    continue
+                if msg["msg_type"] == "error":
+                    rerr = (f"replay cell {idx}: "
+                            f"{msg['content']['ename']}: "
+                            f"{msg['content']['evalue']}")
+                elif msg["msg_type"] == "status" and \
+                        msg["content"]["execution_state"] == "idle":
+                    idle = True
+            if rerr:
+                record({"event": "replay_error", "error": rerr[:300]})
+                kc.stop_channels()
+                km.shutdown_kernel(now=True)
+                record({"event": "unit_finished", "status": 4})
+                return 4
+        record({"event": "replay_done"})
+
     status = 0
     try:
         for idx, cell in enumerate(nb["cells"]):
