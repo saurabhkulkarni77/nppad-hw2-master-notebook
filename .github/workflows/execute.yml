@@ -90,8 +90,15 @@ jobs:
           cd state
           UNITFILE=$(ls units/${{ inputs.unit }}_*.ipynb)
           echo "executing $UNITFILE"
+          SKIPARG=""
+          if [ "${{ inputs.unit }}" = "U4" ]; then
+            # Late-fusion GPU preset cells (llama.cpp + 32B GGUF server)
+            # stay unexecuted on CPU runners by design; the local
+            # variant cells inserted after master 178 run instead.
+            SKIPARG="--skip-ids merged-0188,merged-0189,merged-0190"
+          fi
           python ../run_unit.py "$UNITFILE" --workdir . --kernel python3 \
-            --log "logs_${{ inputs.unit }}.json" 2>&1 | tee "console_${{ inputs.unit }}.log"
+            --log "logs_${{ inputs.unit }}.json" $SKIPARG 2>&1 | tee "console_${{ inputs.unit }}.log"
 
       - name: Assemble + PDF
         if: ${{ inputs.unit == 'assemble' }}

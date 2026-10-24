@@ -30,7 +30,11 @@ def main():
     ap.add_argument("--kernel", default="python3")
     ap.add_argument("--cell-timeout", type=int, default=14400)
     ap.add_argument("--log", default=None)
+    ap.add_argument("--skip-ids", default="",
+                    help="comma-separated cell ids to leave unexecuted "
+                         "(e.g. GPU-preset cells on CPU machines)")
     args = ap.parse_args()
+    skip_ids = {s.strip() for s in args.skip_ids.split(",") if s.strip()}
 
     veh = Path(args.vehicle)
     nb = json.loads(veh.read_text())
@@ -117,6 +121,10 @@ def main():
     try:
         for idx, cell in enumerate(nb["cells"]):
             if cell.get("cell_type") != "code":
+                continue
+            if cell.get("id") in skip_ids:
+                record({"event": "cell_skipped", "index": idx,
+                        "id": cell.get("id")})
                 continue
             if cell.get("execution_count") is not None \
                     and "exec_error" not in cell.get("metadata", {}):
