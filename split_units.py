@@ -116,28 +116,41 @@ SCAFFOLD_SUMM = {
 }
 
 
-SCAFFOLD_CPU_PRESET = {
-    "cell_type": "code", "id": "scaffold-cpu-preset",
-    "metadata": {}, "execution_count": None, "outputs": [],
-    "source": (
-        "# --- execution scaffold (vehicle only; not part of the study) ---\n"
-        "# The setup cell above applies the notebook's Colab full-scale\n"
-        "# preset (Qwen2.5-7B backbone on CUDA). This machine is CPU-only,\n"
-        "# so restore the library's built-in local scale instead\n"
-        "# (Qwen2.5-0.5B-Instruct on CPU, library default stage sizes) -\n"
-        "# the configuration the SensorLLM study itself used on this\n"
-        "# class of machine. Only preset env vars change; the env must be\n"
-        "# corrected before sensorllm_lib is first imported.\n"
-        "import os\n"
-        "os.environ[\"SENSORLLM_DEVICE\"] = \"cpu\"\n"
-        "os.environ[\"SENSORLLM_BACKBONE\"] = \"Qwen/Qwen2.5-0.5B-Instruct\"\n"
-        "for _k in [\"SENSORLLM_S1_W60\", \"SENSORLLM_S1_W600\",\n"
-        "           \"SENSORLLM_S1_EPOCHS\", \"SENSORLLM_TOKENS_PER_CHANNEL\",\n"
-        "           \"SENSORLLM_MICRO\"]:\n"
-        "    os.environ.pop(_k, None)\n"
-        "print('CPU preset active:', os.environ['SENSORLLM_BACKBONE'],\n"
-        "      '| device cpu | library local scale')\n"),
-}
+def _cpu_preset_transform(src):
+    """Execution-copy adaptation of master cell 159 (SensorLLM setup).
+
+    The cell ends with the notebook's Colab full-scale preset block
+    (Qwen2.5-7B backbone, CUDA device, stage sizes x15). On CPU-only
+    machines that preset cannot run; the SensorLLM study's own local
+    configuration is the library default scale with the 0.5B backbone
+    on CPU. Rewrite ONLY those preset assignment lines in the vehicle
+    copy (the master notebook is untouched) and mark the change with a
+    comment. Dropping the scale lines restores library defaults.
+    """
+    drop_keys = ("SENSORLLM_S1_W60", "SENSORLLM_S1_W600",
+                 "SENSORLLM_S1_EPOCHS", "SENSORLLM_TOKENS_PER_CHANNEL",
+                 "SENSORLLM_MICRO")
+    out = []
+    marked = False
+    for line in src.splitlines(keepends=True):
+        stripped = line.strip()
+        if any(stripped.startswith(f'os.environ["{k}"]') for k in drop_keys):
+            continue
+        if stripped.startswith('os.environ["SENSORLLM_BACKBONE"]'):
+            if not marked:
+                out.append("# [execution copy: Colab full-scale preset "
+                           "replaced by the study's local CPU preset - "
+                           "0.5B backbone, cpu device, library stage "
+                           "sizes]\n")
+                marked = True
+            out.append('os.environ["SENSORLLM_BACKBONE"] = '
+                       '"Qwen/Qwen2.5-0.5B-Instruct"\n')
+            continue
+        if stripped.startswith('os.environ["SENSORLLM_DEVICE"]'):
+            out.append('os.environ["SENSORLLM_DEVICE"] = "cpu"\n')
+            continue
+        out.append(line)
+    return "".join(out)
 
 
 def main():
@@ -154,9 +167,11 @@ def main():
             if c["cell_type"] == "code":
                 c["outputs"] = []
                 c["execution_count"] = None
-            ucells.append(c)
             if unit == "U3_sensorllm" and i == 159:
-                ucells.append(copy.deepcopy(SCAFFOLD_CPU_PRESET))
+                src = c["source"]
+                joined = "".join(src) if isinstance(src, list) else src
+                c["source"] = _cpu_preset_transform(joined)
+            ucells.append(c)
             if unit == "U4_latefusion" and i == 178:
                 ucells.append(copy.deepcopy(LF_NOTE))
                 ucells.append(copy.deepcopy(LF_VARIANT))
