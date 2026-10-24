@@ -103,11 +103,15 @@ jobs:
       - name: Assemble + PDF
         if: ${{ inputs.unit == 'assemble' }}
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q texlive-xetex texlive-fonts-recommended texlive-plain-generic lmodern pandoc
           cd state
           python ../assemble.py ../master.ipynb units assembled.ipynb
-          jupyter nbconvert --to pdf --output NPPAD_Master_Executed assembled.ipynb
+          # HTML -> Chrome print-to-pdf (LaTeX route crashes in XeTeX on
+          # this notebook's long stream outputs: "can't happen (flushing)")
+          jupyter nbconvert --to html --output NPPAD_Master_Executed assembled.ipynb
+          google-chrome --headless=new --disable-gpu --no-sandbox \
+            --print-to-pdf=NPPAD_Master_Executed.pdf \
+            --print-to-pdf-no-header \
+            "$PWD/NPPAD_Master_Executed.html"
           ls -la assembled.ipynb NPPAD_Master_Executed.pdf
 
       - name: Pack workspace
