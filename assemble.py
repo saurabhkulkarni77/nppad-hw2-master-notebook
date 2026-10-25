@@ -7,7 +7,9 @@ executed (the late-fusion GPU preset) keep null counts and no outputs.
 The late-fusion local-variant note + run cells (vehicle-only ids) are
 inserted right after master cell 178's position.
 
-Usage: assemble.py MASTER.ipynb UNITS_DIR OUT.ipynb
+Usage: assemble.py MASTER.ipynb UNITS_DIR OUT.ipynb [DROP_IDS]
+DROP_IDS: optional comma-separated master cell ids to omit entirely
+(order-change exclusion; reported under "dropped").
 """
 import json, sys
 from pathlib import Path
@@ -21,6 +23,9 @@ def main():
     master = json.loads(Path(sys.argv[1]).read_text())
     units_dir = Path(sys.argv[2])
     out = Path(sys.argv[3])
+    drop_ids = set()
+    if len(sys.argv) > 4 and sys.argv[4]:
+        drop_ids = {s.strip() for s in sys.argv[4].split(",") if s.strip()}
 
     executed = {}   # cell id -> executed cell
     extras = []     # vehicle-only cells (LF note + variant), in order
@@ -34,8 +39,12 @@ def main():
 
     anchor_id = master["cells"][178]["id"]
     new_cells = []
-    report = {"executed": 0, "unexecuted": [], "missing": []}
+    report = {"executed": 0, "unexecuted": [], "missing": [],
+              "dropped": []}
     for c in master["cells"]:
+        if c["id"] in drop_ids:
+            report["dropped"].append(c["id"])
+            continue
         ec = executed.get(c["id"])
         if c["cell_type"] == "code":
             if ec is None:
