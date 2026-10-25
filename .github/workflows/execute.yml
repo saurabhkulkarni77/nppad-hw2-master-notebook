@@ -13,6 +13,16 @@ on:
         required: false
         type: string
         default: ""
+      reset_ids:
+        description: "Comma-separated cell ids to clear + re-execute in the unit vehicle (blank = none)"
+        required: false
+        type: string
+        default: ""
+      drop_ids:
+        description: "Comma-separated master cell ids for assemble to omit entirely (blank = none)"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: nppad-exec
@@ -81,6 +91,29 @@ jobs:
           mv units_fresh units
           ls -la units
 
+      - name: Reset cells for re-execution
+        if: ${{ inputs.unit != 'assemble' && inputs.reset_ids != '' }}
+        env:
+          RESET_IDS: ${{ inputs.reset_ids }}
+        run: |
+          cd state
+          UNITFILE=$(ls units/${{ inputs.unit }}_*.ipynb)
+          python - "$UNITFILE" <<'PYEOF'
+          import json, os, sys
+          p = sys.argv[1]
+          ids = {s.strip() for s in os.environ["RESET_IDS"].split(",") if s.strip()}
+          nb = json.load(open(p))
+          n = 0
+          for c in nb["cells"]:
+              if c.get("id") in ids and c["cell_type"] == "code":
+                  c["outputs"] = []
+                  c["execution_count"] = None
+                  c.get("metadata", {}).pop("exec_error", None)
+                  n += 1
+          json.dump(nb, open(p, "w"), indent=1)
+          print(f"reset {n} cells in {p}")
+          PYEOF
+
       - name: Run unit
         if: ${{ inputs.unit != 'assemble' }}
         env:
@@ -104,7 +137,8 @@ jobs:
         if: ${{ inputs.unit == 'assemble' }}
         run: |
           cd state
-          python ../assemble.py ../master.ipynb units assembled.ipynb
+          python ../assemble.py ../master.ipynb units assembled.ipynb "${{ inputs.drop_ids }}"
+          python ../scrub_sources.py assembled.ipynb
           # HTML -> Chrome print-to-pdf (LaTeX route crashes in XeTeX on
           # this notebook's long stream outputs: "can't happen (flushing)")
           jupyter nbconvert --to html --output NPPAD_Master_Executed assembled.ipynb
