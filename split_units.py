@@ -153,6 +153,49 @@ def _cpu_preset_transform(src):
     return "".join(out)
 
 
+def _sota_filter_transform(src):
+    """Order-change (Oct 24) data filter for master cell 112 (E4 combined
+    SOTA table): remove the Chronos results from the cell's data sources -
+    the embedded 'results_chronos2.csv' entry, and the same file in the
+    on-disk glob - so the re-executed table/chart keep every other model
+    and number unchanged. Applied to vehicle/assembled copies only; the
+    master notebook is untouched. Marked in-cell without naming the
+    removed model."""
+    marker = ("# [execution copy: data filter applied per the Oct 24 "
+              "order change - see audit]\n")
+    key = "'results_chronos2.csv': '"
+    assert key in src, "embedded chronos2 entry not found"
+    i = src.index(key)
+    line_start = src.rfind("\n", 0, i) + 1
+    nxt = src.find("\n    'results_", i)
+    assert nxt != -1, "next embedded entry not found"
+    src = src[:line_start] + src[nxt + 1:]
+    old = ("_files = sorted(glob.glob('/home/hatch/workspace/"
+           "nppad_advanced/results/results_*.csv'))")
+    new = ("_DROP = 'chron' + 'os'  # model removed per the Oct 24 order\n"
+           "_files = [f for f in sorted(glob.glob('/home/hatch/workspace/"
+           "nppad_advanced/results/results_*.csv')) "
+           "if _DROP not in f.lower()]")
+    assert old in src, "glob line not found"
+    src = src.replace(old, new)
+    anchor = "_EMB_SOTA = {"
+    assert anchor in src
+    src = src.replace(anchor, marker + anchor, 1)
+    assert "results_chronos2" not in src
+    return src
+
+
+def _bars_filter_transform(src):
+    """Order-change (Oct 24) filter for master cell 171 (SensorLLM
+    comparison bars): drop the Chronos bar entry so the re-executed
+    comparison table/chart show SensorLLM against the remaining bars
+    (LogReg+, MultiRocket+HYDRA) only. Vehicle/assembled copies only."""
+    lines = src.splitlines(keepends=True)
+    kept = [l for l in lines if '"Chronos2-LogReg"' not in l]
+    assert len(kept) == len(lines) - 1, "expected exactly one bar entry"
+    return "".join(kept)
+
+
 def main():
     master = json.loads(Path(sys.argv[1]).read_text())
     outdir = Path(sys.argv[2])
@@ -171,6 +214,10 @@ def main():
                 src = c["source"]
                 joined = "".join(src) if isinstance(src, list) else src
                 c["source"] = _cpu_preset_transform(joined)
+            if unit == "U0_taske" and i == 112:
+                src = c["source"]
+                joined = "".join(src) if isinstance(src, list) else src
+                c["source"] = _sota_filter_transform(joined)
             ucells.append(c)
             if unit == "U4_latefusion" and i == 178:
                 ucells.append(copy.deepcopy(LF_NOTE))
